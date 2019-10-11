@@ -33,24 +33,25 @@ def pose_estimate_nls(K, Twcg, Ipts, Wpts):
     #--- FILL ME IN ---
 
     #------------------
+    # Twc = np.eye((4,4))
     
     return Twc
 
 #----- Functions Go Below -----
 
-def epose_from_hpose(T):
-    """Euler pose vector from homogeneous pose matrix."""
-    E = np.zeros((6, 1))
-    E[0:3] = np.reshape(T[0:3, 3], (3, 1))
-    E[3:6] = rpy_from_dcm(T[0:3, 0:3])
-  
-    return E
-
-def hpose_from_epose(E):
-    """Homogeneous pose matrix from Euler pose vector."""
-    T = np.zeros((4, 4))
-    T[0:3, 0:3] = dcm_from_rpy(E[3:6])
-    T[0:3, 3] = np.reshape(E[0:3], (3,))
-    T[3, 3] = 1
-  
-    return T
+# def epose_from_hpose(T):
+#     """Euler pose vector from homogeneous pose matrix."""
+#     E = np.zeros((6, 1))
+#     E[0:3] = np.reshape(T[0:3, 3], (3, 1))
+#     E[3:6] = rpy_from_dcm(T[0:3, 0:3])
+#   
+#     return E
+# 
+# def hpose_from_epose(E):
+#     """Homogeneous pose matrix from Euler pose vector."""
+#     T = np.zeros((4, 4))
+#     T[0:3, 0:3] = dcm_from_rpy(E[3:6])
+#     T[0:3, 3] = np.reshape(E[0:3], (3,))
+#     T[3, 3] = 1
+#   
+#     return T
