@@ -31,7 +31,27 @@ def pose_estimate_nls(K, Twcg, Ipts, Wpts):
     J  = np.zeros((2*tp, 6))                # Jacobian.
 
     #--- FILL ME IN ---
-
+    eps = 0.0000001
+    #dx.T = tx, ty, tz, r(phi), p(theta), q(psi)
+    X = epose_from_hpose(Twcg) 
+    Twc = hpose_from_epose(X)
+    for iter in range(0,maxIters):
+        J  = np.zeros((2*tp, 6))
+        dY = np.zeros((2*tp, 1)) 
+        res_sum = 0
+        #calculate jacobian for all the points
+        for index,row in enumerate(Wpts.T):
+            J [index*2:(index+1)*2,:] = find_jacobian(K,Twc,row.reshape(3,1))
+            dY[index*2:(index+1)*2,:] = (Ipts[:,index]-Wpts_to_Ipts(K,Twc,Wpts)[:,index]).reshape(2,1)
+            res_sum += np.sum(dY[index*2:(index+1)*2,:]) 
+        try:
+            dx = np.dot(np.dot( inv(np.dot(J.T,J)),J.T),dY)
+        except:
+            return Twc
+        X = X + dx
+        Twc = hpose_from_epose(X)
+        if( np.abs(res_sum) < eps):
+            break
     #------------------
     # Twc = np.eye((4,4))
     
@@ -39,19 +59,32 @@ def pose_estimate_nls(K, Twcg, Ipts, Wpts):
 
 #----- Functions Go Below -----
 
-# def epose_from_hpose(T):
-#     """Euler pose vector from homogeneous pose matrix."""
-#     E = np.zeros((6, 1))
-#     E[0:3] = np.reshape(T[0:3, 3], (3, 1))
-#     E[3:6] = rpy_from_dcm(T[0:3, 0:3])
-#   
-#     return E
-# 
-# def hpose_from_epose(E):
-#     """Homogeneous pose matrix from Euler pose vector."""
-#     T = np.zeros((4, 4))
-#     T[0:3, 0:3] = dcm_from_rpy(E[3:6])
-#     T[0:3, 3] = np.reshape(E[0:3], (3,))
-#     T[3, 3] = 1
-#   
-#     return T
+def Wpts_to_Ipts(K,Twc, Wpts):
+    tp = Wpts.shape[1]
+    R = Twc[:3,:3]
+    T = Twc[:3,3]
+    Tcw = np.hstack([R.T, -1*R.T.dot(T).reshape(3,1)])
+    Tcw = np.vstack([Tcw, [0,0,0,1]])
+    Wpts_h = np.vstack([Wpts, np.ones(shape = (1,tp)) ])
+    K_h = np.hstack([K, np.zeros(shape=(3,1)) ])
+    K_h = np.vstack([K_h, [0,0,0,1]])
+    pts_img = K_h.dot(Tcw.dot(Wpts_h))
+    pts_img = pts_img / pts_img[2,:]
+    return pts_img[:2,:]
+
+def epose_from_hpose(T):
+    """Euler pose vector from homogeneous pose matrix."""
+    E = np.zeros((6, 1))
+    E[0:3] = np.reshape(T[0:3, 3], (3, 1))
+    E[3:6] = rpy_from_dcm(T[0:3, 0:3])
+  
+    return E
+
+def hpose_from_epose(E):
+    """Homogeneous pose matrix from Euler pose vector."""
+    T = np.zeros((4, 4))
+    T[0:3, 0:3] = dcm_from_rpy(E[3:6])
+    T[0:3, 3] = np.reshape(E[0:3], (3,))
+    T[3, 3] = 1
+  
+    return T
