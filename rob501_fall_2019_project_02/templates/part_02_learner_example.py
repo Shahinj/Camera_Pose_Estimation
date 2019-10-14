@@ -16,3 +16,16 @@ Ipts = cross_junctions(I, bpoly, Wpts)
 
 # You can plot the points to check!
 print(Ipts)
+
+
+# 
+# def plot(I):
+#     import matplotlib.pyplot as plt
+#     plt.imshow(I, cmap = 'gray')
+#     plt.show()
+# 
+# 
+# for i,row in enumerate(Ipts.T):
+#     x,y = row
+#     x,y = int(x), int(y)
+#     I[y,x] = 255
