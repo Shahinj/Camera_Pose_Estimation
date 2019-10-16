@@ -1,4 +1,5 @@
 import numpy as np
+from scipy.linalg import null_space
 from scipy.ndimage.filters import *
 
 def cross_junctions(I, bounds, Wpts):
@@ -28,152 +29,48 @@ def cross_junctions(I, bounds, Wpts):
     
     m, n = I.shape
     
+    ###estimate the border coordinates in  world frame (meters)
+    #square size
+    sqaure_d = 63.5 / 1000.0
+    #border size in x direction, about 1/3 of a square
+    border_dx = (1.0/3.0) * sqaure_d #in meters (in world points)
+    #border size in y direction, about 1/5 of a square
+    border_dy = (1.0/5.0) * sqaure_d #in meters (in world points)
+    #how much we need to travel from closest junctions to the borders to get to the border
+    dx = border_dx + sqaure_d
+    dy = border_dy + sqaure_d
+        
+    #get the closest junctions to the border
+    left_top, right_top, left_down, right_down = Wpts[:,0:1], Wpts[:,7:8], Wpts[:,-8:-7], Wpts[:,-1:]
+    #calculate the border coordinates base on the estimates
+    left_top, right_top, left_down, right_down = left_top + np.array([[-1*dx], [-1*dy],[0]]), right_top + np.array([[dx], [-1*dy],[0]]), left_down + np.array([[-1*dx], [dy],[0]]), right_down  + np.array([[dx], [dy],[0]])
 
     ###homography part
-    # Compute the perspective homography we need...
-    to_convert = np.array([[  0, 255, 255,   0],
-           [  0,   0, 255, 255]])
-           
-           
-    Ihack = np.zeros((255,255))
+    #define the borders of the world frame
+    to_convert = np.hstack([left_top,right_top,right_down, left_down])[:2,:]
+    #do the homography from the world frame to the image frame
     H,A = dlt_homography(to_convert,bounds)
     
-    tc_list = [(x,y) for x in range(0,255) for y in range(0,255)]
-    tc_coords = np.array(tc_list).T
-    tc_coords_h = np.vstack([tc_coords,[1] * 255 * 255])
-    tc_homographied = H.dot(tc_coords_h)
-    tc_homographied_norm = tc_homographied[:2,:] / tc_homographied[2,:]
+    ###compute the homographied points
+    Wpts_h = Wpts.copy()
+    Wpts_h[2,:] = 1
+    homographied_junctions = (H.dot(Wpts_h) / H.dot(Wpts_h)[2,:])[:2,:]
         
-    #takes a bit of time
-    for i in range(0,tc_homographied_norm.shape[1]):
-        x,y = tc_coords[:,i]
-        Ihack[y, x] =  bilinear_interp(I,tc_homographied_norm[:,i:i+1])
-    
-
-
-    ###loop through the grid and get a good initial junction points
-    start_x,start_y = 12,8
-    x_inc = 25.5
-    y_inc = 34.3
-    junctions = []
-    for down in range(0,6):
-        for right in range(0,8):
-            poi = saddle_point(Ihack[int(start_y + (y_inc*down)) : int(start_y + ((down+2)*y_inc)),int(start_x + (x_inc*right)) : int(start_x + ((right+2)*x_inc))])
-            junctions.append( [ start_x + (x_inc*right) + poi[0,0] , start_y + (y_inc*down) + poi[1,0]])
-    
-    ###K-means for clustering part
-    junctions_array = np.array(junctions)
-    centroids = junctions_array.T
-    for iter in range(0,10):
-        closest = closest_centroid(junctions_array.T, centroids)
-        new_centroids = move_centroids(junctions_array.T, closest)
-        centroids = new_centroids
-
-    #removing the nearest to the bounds
-    mid_junctions = centroids
-    #remove_closest_to_bounds(centroids.T,to_convert)
-    to_return = []
-    
-    #another saddle point on top of centroids
-    for i,row in enumerate(mid_junctions.T):
+    #loop through each homographied junction, and pass them to saddle point 
+    #with a window to get more accurate results
+    final = []
+    window = 10
+    for index, row in enumerate(homographied_junctions.T):
         x,y = row
         x,y = int(x), int(y)
-        window = 20
-        poi = saddle_point(Ihack[y-window:y+window,x-window:x+window])
-        to_return.append( [x - window + poi[0,0], y - window + poi[1,0]] )
+        poi = saddle_point(I[y-window:y+window,x-window:x+window])
+        final.append( [x - window + poi[0,0], y - window + poi[1,0]] )
     
-    #inverse homography and return
-    to_return_h = np.array(to_return).T
-    to_return_h = np.vstack( [to_return_h, np.ones(shape = (1,to_return_h.shape[1]))])
-    
-    a = H.dot(to_return_h)
-    Ipts = (a/a[2,:])[:2,:]
-    
-
+    Ipts = np.array(final).T
 
     #------------------
 
     return Ipts
-
-
-
-# def plot(I):
-#     import matplotlib.pyplot as plt
-#     plt.imshow(I, cmap = 'gray')
-#     plt.show()
-    
-# 
-# def find_neighbours(I, pt):
-#     to_check_q = []
-#     visited = []
-#     
-#     to_check_q.append( (pt[0,0],pt[1,0]))
-#     
-#     while(len(to_check_q) != 0):
-#         to_check = to_check_q.pop()
-#         if(to_check in visited):
-#             continue
-#         visited.append(to_check)
-#         x = to_check[0]
-#         y = to_check[1]
-#         
-#         if( x+1 >= I.shape[1] or x+1 < 0 or y >= I.shape[0] or y < 0):
-#             right = 0
-#         else:
-#             right = I[ np.clip(y,0,I.shape[0]), np.clip(x+1,0,I.shape[1]) ]
-#         if( x-1 < 0 or x-1 >= I.shape[1] or y >= I.shape[0] or y < 0):
-#             left = 0
-#         else:
-#             left  = I[ np.clip(y,0,I.shape[0]), np.clip(x-1,0,I.shape[1]) ]
-#         if( y+1 >= I.shape[0] or y+1 < 0 or x >= I.shape[1] or x < 0):
-#             up = 0
-#         else:
-#             up    = I[ np.clip(y+1,0,I.shape[0]), np.clip(x,0,I.shape[1]) ]
-#         if( y-1 < 0 or y-1 >= I.shape[0] or x >= I.shape[1] or x < 0):
-#             down = 0  
-#         else:
-#             down  = I[ np.clip(y-1,0,I.shape[0]), np.clip(x,0,I.shape[1]) ]
-#         
-#         
-#         if(left > 0):
-#             if( (x-1,y) not in to_check_q):
-#                 to_check_q.append( (x-1,y))
-#         if(right > 0):
-#             if( (x+1,y) not in to_check_q):
-#                 to_check_q.append( (x+1,y))
-#         if(up > 0):
-#             if( (x,y+1) not in to_check_q):
-#                 to_check_q.append( (x,y+1))
-#         if(down > 0):
-#             if( (x,y-1) not in to_check_q):
-#                 to_check_q.append( (x,y-1))
-#                 
-#     return visited
-    
-def distance_to_line(p0, line_p1, line_p2):
-        x_diff = line_p2[0] - line_p1[0]
-        y_diff = line_p2[1] - line_p1[1]
-        num = abs(y_diff*p0[0] - x_diff*p0[1] + line_p2[0]*line_p1[1] - line_p2[1]*line_p1[0])
-        den = np.sqrt(y_diff**2 + x_diff**2)
-        return num / den
-    
-def remove_closest_to_bounds(points, bounds):
-    distances = np.zeros( shape = (len(points),6))
-    result = np.zeros( shape = (0,2))
-    for i,point in enumerate(points):
-        top_d   = distance_to_line(point, bounds[:,1],bounds[:,0])
-
-        right_d = distance_to_line(point, bounds[:,2],bounds[:,1])
-        
-        bot_d   = distance_to_line(point, bounds[:,3],bounds[:,2])
-        
-        left_d  = distance_to_line(point, bounds[:,0],bounds[:,3])
-
-        distances[i,:]= [point[0], point[1] ,top_d,right_d, bot_d, left_d] 
-
-    
-    distances = np.hstack([distances,distances[:,2:].min(axis = 1).reshape(len(distances),1)])
-    return distances[distances[:,-1].argsort()][-48:,:2]
 
     
 def saddle_point(I):
@@ -227,71 +124,6 @@ def saddle_point(I):
     #------------------
 
     return pt
-    
-    
-def bilinear_interp(I, pt):
-    """
-    Performs bilinear interpolation for a given image point.
-
-    Given the (x, y) location of a point in an input image, use the surrounding
-    4 pixels to conmpute the bilinearly-interpolated output pixel intensity.
-
-    Note that images are (usually) integer-valued functions (in 2D), therefore
-    the intensity value you return must be an integer (use round()).
-
-    This function is for a *single* image band only - for RGB images, you will 
-    need to call the function once for each colour channel.
-
-    Parameters:
-    -----------
-    I   - Single-band (greyscale) intensity image, 8-bit np.array (i.e., uint8).
-    pt  - 2x1 np.array of point in input image (x, y), with subpixel precision.
-
-    Returns:
-    --------
-    b  - Interpolated brightness or intensity value (whole number >= 0).
-    """
-    #--- FILL ME IN ---
-
-    if pt.shape != (2, 1):
-        raise ValueError('Point size is incorrect.')
-    
-    #Get the x and y value from the point
-    x = pt[0,0]
-    y = pt[1,0]
-    #define the x_vector
-    x_vec = np.array([[1],[x],[y],[x*y]])
-    #define the lower and upper bounds of x and y
-    x_low = np.ceil(x).astype(int)  - 1
-    x_up = np.floor(x).astype(int)  + 1
-    y_low = np.ceil(y).astype(int)  - 1
-    y_up = np.floor(y).astype(int)  + 1
-    
-
-    #x is across columns of the image, y is across rows, also clip to get the nearest pixel (np)
-    x_low_np = np.clip( x_low ,0, I.shape[1] - 1)
-    x_up_np  = np.clip( x_up  ,0, I.shape[1] - 1) 
-    y_low_np = np.clip( y_low ,0, I.shape[0] - 1) 
-    y_up_np  = np.clip( y_up  ,0, I.shape[0] - 1) 
-    
-    #get the values for the 4 nearest points from the Image
-    left_down  = I[y_low_np,x_low_np]
-    right_down = I[y_low_np,x_up_np ]
-    left_up    = I[y_up_np ,x_low_np]
-    right_up   = I[y_up_np ,x_up_np ]
-    
-    #get the B coefficients
-    b_coefs = np.linalg.inv(np.array([
-                        [1,x_low, y_low, x_low * y_low],
-                        [1,x_low, y_up , x_low * y_up ],
-                        [1,x_up , y_low, x_up  * y_low],
-                        [1,x_up , y_up , x_up  * y_up ]
-                    ])).T.dot(x_vec)
-    #calculate the value of b and round, make sure it is >= 0
-    b =  np.max(np.round(b_coefs.T.dot(np.array([[left_down], [left_up], [right_down], [right_up]]))), 0)[0]
-    #------------------
-
-    return b
 
 
 def dlt_homography(I1pts, I2pts):
@@ -330,7 +162,7 @@ def dlt_homography(I1pts, I2pts):
         A[i*2 : (i+1)*2,:] = A_i
     
     #calculate the H matrix using null space
-    H = null_space_calc(A)
+    H = null_space(A)
     #reshape the H matrix
     H = H.reshape(3,3)
     #get the last entry and normalize
@@ -342,197 +174,3 @@ def dlt_homography(I1pts, I2pts):
     #------------------
 
     return H, A
-    
-def null_space_calc(U):
-    # find the eigenvalues and eigenvector of U(transpose).U
-    e_vals, e_vecs = np.linalg.eig(np.dot(U.T, U))  
-    # extract the eigenvector (column) associated with the minimum eigenvalue
-    return e_vecs[:, np.argmin(e_vals)] 
-
-
-def move_centroids(points, closest):
-    """returns the new centroids assigned from the points closest to them"""
-    x = points[closest==1].mean(axis=0)
-    y = points[closest==0].mean(axis=0)
-    return np.array([[y,x]]).reshape(points.shape)
-    
-def closest_centroid(points, centroids):
-    """returns an array containing the index to the nearest centroid for each point"""
-    distances = np.sqrt(((points - centroids[:, np.newaxis])**2).sum(axis=2))
-    return np.argmin(distances, axis=0)
-    
-
-# import os
-# os.chdir(r'C:\Users\Shahin\Documents\School\Skule\Year 4\Fall\ROB501\Camera_Pose_Estimation\rob501_fall_2019_project_02\templates')
-# 
-# if __name__ == "__main__":
-#  
-# 
-#     import numpy as np
-#     from imageio import imread
-#     from mat4py import loadmat
-#     from cross_junctions import cross_junctions
-#     
-#     # Load the boundary.
-#     bpoly = np.array(loadmat("bounds.mat")["bpolyh1"])
-#     
-#     # Load the world points.
-#     Wpts = np.array(loadmat("world_pts.mat")["world_pts"])
-#     
-#     # Load the example target image.
-#     I = imread("example_target.png")
-#     
-#     # Ipts = cross_junctions(I, bpoly, Wpts)
-#     # mid_junctions = remove_closest_to_bounds(centroids,bpoly)
-#     m, n = I.shape
-#     
-# 
-#     #homography part
-#     # Compute the perspective homography we need...
-#     to_convert = np.array([[  0, 255, 255,   0],
-#            [  0,   0, 255, 255]])
-#            
-#            
-#     Ihack = np.zeros((255,255))
-#     H,A = dlt_homography(to_convert,bpoly)
-#     
-#     tc_list = [(x,y) for x in range(0,255) for y in range(0,255)]
-#     tc_coords = np.array(tc_list).T
-#     tc_coords_h = np.vstack([tc_coords,[1] * 255 * 255])
-#     tc_homographied = H.dot(tc_coords_h)
-#     tc_homographied_norm = tc_homographied[:2,:] / tc_homographied[2,:]
-#         
-#     for i in range(0,tc_homographied_norm.shape[1]):
-#         x,y = tc_coords[:,i]
-#         Ihack[y, x] =  bilinear_interp(I,tc_homographied_norm[:,i:i+1])
-#     
-#     start_x,start_y = 12,8
-#     x_inc = 25.5
-#     y_inc = 34.3
-#     junctions = []
-#     for down in range(0,6):
-#         for right in range(0,8):
-#             poi = saddle_point(Ihack[int(start_y + (y_inc*down)) : int(start_y + ((down+2)*y_inc)),int(start_x + (x_inc*right)) : int(start_x + ((right+2)*x_inc))])
-#             junctions.append( [ start_x + (x_inc*right) + poi[0,0] , start_y + (y_inc*down) + poi[1,0]])
-#     
-#     for item in junctions:
-#         Ihack[ int(item[1]), int(item[0]) ] = 255
-#     
-#     
-#     #loop through the bounding box
-#     for x in     range(0 ,255):
-#         for y in range(0 ,255):
-#             #define the homogenous point of the billboard
-#             homogenous_point = np.array([[x,y,1.0]]).T
-#             #get the corresponding point in the soldiers tower
-#             correspondence = H.dot(homogenous_point)
-#             #normalize the correspondence point by w
-#             correspondence = correspondence / correspondence[2,0]
-#             #bilinearly interpolate the soldiers tower
-#             interpolated = bilinear_interp(I,correspondence[:-1,0:])
-#             #set the intensity of the yd picture to st
-#             Ihack[y, x] = interpolated
-#     #        
-#     # I_homography,H = apply_homography(I,bpoly,to_convert)
-#      
-#     
-#     
-#     
-#     
-#     
-#     
-#     dx,dy = np.gradient(Ihack)
-#     
-#     Ix = gaussian_filter(dx,1)
-#     Iy = gaussian_filter(dy,1)
-#     
-#     R_score = np.zeros(Ihack.shape)
-# 
-#     
-#     #alpha = -1 * 0.000000000001
-#     alpha = 0.03
-#     
-#     A = np.zeros(shape = (Ihack.shape[0],Ihack.shape[1],2,2))
-#     A[:,:,0,0] = gaussian_filter(Ix ** 2,2)
-#     A[:,:,0,1] = gaussian_filter(Ix * Iy,2)
-#     A[:,:,1,0] = gaussian_filter(Ix * Iy,2)
-#     A[:,:,1,1] = gaussian_filter(Iy ** 2,2)
-#         
-#     evals, evecs = np.linalg.eig(A)
-#     
-#     R_score[:,:] = (evals[:,:,0] * evals[:,:,1]) - alpha * ((evals[:,:,0] + evals[:,:,1])** 2) 
-#     #(np.linalg.det(A) - alpha * (np.trace(A.T).T) ** 2)
-#     #(evals[:,:,0] * evals[:,:,1]) - alpha * ((evals[:,:,0] + evals[:,:,1])** 2) 
-#     R_thresh = (R_score > np.percentile(R_score,90)) * R_score
-#     
-#     R_thresh = maximum_filter(R_thresh,10)
-# 
-#     # junctions = []
-#     # grouped = []
-#     # poligono = [tuple(i) for i in bpoly.T.tolist()]
-#     # for y in range(0,m):
-#     #     for x in range(0,n):
-#     #         if((x,y) in grouped):
-#     #             continue
-#     #         pt = np.array([[x],[y]])
-#     #         if(R_thresh[y][x] > 0 and point_in_poly(pt, poligono)):
-#     #             neighbours = find_neighbours(R_thresh, np.array([[x],[y]]))
-#     #             grouped= grouped + neighbours
-#     #             avg = plot(R.array(neighbours).mean(axis = 0)
-#     #             junctions.append(np.array([[avg[0]],[avg[1]]]))
-#                 
-#                 
-#     # junctions = []
-#     # # poligono = [tuple(i) for i in bpoly.T.tolist()]
-#     # for y in range(0,Ihack.shape[0]):
-#     #     for x in range(0,Ihack.shape[1]):
-#     #         # pt = np.array([[x],[y]])
-#     #         if(R_thresh[y][x] > 0): 
-#     #         # and point_in_poly(pt, poligono)):
-#     #             junctions.append(np.array([[x],[y]]))    
-#     # junctions = np.array(junctions)
-#     # junctions = junctions.T.reshape(junctions.shape[1],junctions.shape[0])
-#     
-#     j2 = np.array(junctions)
-#     centroids = j2.T
-#     eps = 1
-#     while(True):
-#         closest = closest_centroid(j2.T, centroids)
-#         new_centroids = move_centroids(j2.T, closest)
-#         if(np.sqrt(np.sum((new_centroids - centroids) ** 2)) < eps):
-#             break
-#         else:
-#             centroids = new_centroids
-# 
-# 
-#     detected = Ihack.copy()
-#     mid_junctions = remove_closest_to_bounds(centroids.T,to_convert)
-#     to_return = []
-#     
-#     for i,row in enumerate(mid_junctions):
-#         x,y = mid_junctions[i]
-#         x,y = int(x), int(y)
-#         window = 20
-#         # window = 0
-#         # while(True):
-#             # poi = np.array([[1],[1]])
-#         poi = saddle_point(detected[y-window:y+window,x-window:x+window])
-#             # sx,sy = poi.T[0]
-#             # if(sx > 0 and sy > 0):
-#                 # break
-#             # else:
-#                 # window += 5
-#         to_return.append( [x - window + poi[0,0], y - window + poi[1,0]] )
-#         detected[y - window + int(poi[1,0]),x - window + int(poi[0,0])] = 255
-#     plot(detected)    
-#     
-#     
-#     to_return_h = np.array(to_return).T
-#     to_return_h = np.vstack( [to_return_h, np.ones(shape = (1,to_return_h.shape[1]))])
-#     
-#     a = H.dot(to_return_h)
-#     return (a/a[2,:])[:2,:]
-#     
-#     # You can plot the points to check!
-#     # print(Ipts)        
-#           

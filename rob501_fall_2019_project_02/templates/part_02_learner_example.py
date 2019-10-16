@@ -17,7 +17,7 @@ Ipts = cross_junctions(I, bpoly, Wpts)
 # You can plot the points to check!
 print(Ipts)
 
-
+# 
 # 
 # def plot(I):
 #     import matplotlib.pyplot as plt
@@ -29,3 +29,5 @@ print(Ipts)
 #     x,y = row
 #     x,y = int(x), int(y)
 #     I[y,x] = 255
+#     
+# plot(I)
